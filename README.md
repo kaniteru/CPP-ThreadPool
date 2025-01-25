@@ -1,5 +1,5 @@
 # CPP-ThreadPool
-A simple thread pool written in the C++11 standard
+A simple thread pool written in C++ standard 11
 
 ## Features
 - Simple Usage
@@ -12,19 +12,12 @@ A simple thread pool written in the C++11 standard
 #include <kani/thread_pool.hpp>
 using namespace kani;
 
-struct ThreadPool::Config {
-    // The number of workers(threads) to use.
-    // You can check the maximum number of workers that can be used with 'ThreadPool::MAX_WORKER_THREADS'.
-    size_t thread_count;
-
-    // If true, m_numThreads is fixed to 1, and no other tasks will be executed until the current task is completed.
-    bool   ordered_task;
-};
-
-// Uses the maximum available workers.
+// Uses the maximum available worker threads.
 ThreadPool();
-// Initializes the thread pool according to the provided config.
-ThreadPool(const ThreadPool::Config&);
+// Specifies the number of worker threads to use.
+ThreadPool(size_t lenThreads);
+// Number of worker threads fixed at 1, and no other tasks will proceed until the current task is completed.
+OrderedThreadPool();
 ```
 
 ### Example
@@ -43,4 +36,4 @@ tp.stop(); // stop workers
 ```
 
 ## Todo
-- support c++98
+- support c++ 98
