@@ -236,6 +236,9 @@ ThreadPool::~ThreadPool() {
     this->stop();
 }
 
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+inline
+#endif //>=201703L
 const size_t ThreadPool::MAX_WORKER_THREADS = std::thread::hardware_concurrency();
 
 // ======================== C L A S S ========================
