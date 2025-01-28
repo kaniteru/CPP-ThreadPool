@@ -101,9 +101,8 @@ protected:
 public:
     /**
      * @param [in] lenWorkers Specifies the number of worker threads to use.
-     * You can check the maximum available worker threads with ThreadPool::MAX_WORKER_THREADS.
      */
-    explicit ThreadPool(size_t lenWorkers = ThreadPool::MAX_WORKER_THREADS);
+    explicit ThreadPool(size_t lenWorkers = std::thread::hardware_concurrency());
     ~ThreadPool();
 protected:
     const size_t m_lenWorkers;
@@ -114,8 +113,6 @@ protected:
     std::queue<worker_task_t> m_tasks;
     std::condition_variable m_cv;
     mutable std::mutex m_mtx;
-public:
-    static const size_t MAX_WORKER_THREADS; /* The maximum number of workers that can be created. */
 };
 
 // ======================== C L A S S ========================
@@ -235,11 +232,6 @@ inline
 ThreadPool::~ThreadPool() {
     this->stop();
 }
-
-#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
-inline
-#endif //>=201703L
-const size_t ThreadPool::MAX_WORKER_THREADS = std::thread::hardware_concurrency();
 
 // ======================== C L A S S ========================
 // ===    kani::OrderedThreadPool
