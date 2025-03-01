@@ -16,7 +16,7 @@
 namespace kani {
 
 // ======================== C L A S S ========================
-// ===    kani::ThreadPool
+// ===    ThreadPool
 // ======================== C L A S S ========================
 
 class ThreadPool {
@@ -27,11 +27,6 @@ public:
      * @return Returns true if worker running.
      */
     bool is_running() const;
-
-    /**
-     * @return Returns true if stopped working.
-     */
-    bool is_stopped() const;
 
     /**
      * @brief Enqueue a task into worker.
@@ -125,14 +120,9 @@ bool ThreadPool::is_running() const {
 }
 
 inline
-bool ThreadPool::is_stopped() const {
-    return !m_running && m_requestedStop;
-}
-
-inline
 void ThreadPool::enqueue(worker_task_t&& task) {
     {
-        std::unique_lock<std::mutex> lock(m_mtx);
+        std::lock_guard<std::mutex> lock(m_mtx);
         m_tasks.push(std::move(task));
     }
 
@@ -142,7 +132,7 @@ void ThreadPool::enqueue(worker_task_t&& task) {
 inline
 void ThreadPool::enqueue(const worker_task_t& task) {
     {
-        std::unique_lock<std::mutex> lock(m_mtx);
+        std::lock_guard<std::mutex> lock(m_mtx);
         m_tasks.push(task);
     }
 
@@ -151,7 +141,7 @@ void ThreadPool::enqueue(const worker_task_t& task) {
 
 inline
 void ThreadPool::clear() {
-    std::unique_lock<std::mutex> lock(m_mtx);
+    std::lock_guard<std::mutex> lock(m_mtx);
     m_tasks = std::queue<worker_task_t>();
 }
 
@@ -161,7 +151,7 @@ bool ThreadPool::start() {
         return false;
     }
 
-    std::unique_lock<std::mutex> lock(m_mtx);
+    std::lock_guard<std::mutex> lock(m_mtx);
 
     m_running = true;
     m_requestedStop = false;
@@ -183,12 +173,12 @@ bool ThreadPool::stop() {
     m_requestedStop = true;
 
     {
-        std::unique_lock<std::mutex> lock(m_mtx);
+        std::lock_guard<std::mutex> lock(m_mtx);
         m_cv.notify_all();
     }
 
     for (auto& it : m_workers) {
-        while (it.joinable()) {
+        if (it.joinable()) {
             it.join();
         }
     }
@@ -234,7 +224,7 @@ ThreadPool::~ThreadPool() {
 }
 
 // ======================== C L A S S ========================
-// ===    kani::OrderedThreadPool
+// ===    OrderedThreadPool
 // ======================== C L A S S ========================
 
 class OrderedThreadPool : public ThreadPool {
@@ -255,8 +245,6 @@ public:
      */
     OrderedThreadPool();
     ~OrderedThreadPool() = default;
-protected:
-    mutable std::mutex m_orderedMtx;
 };
 
 // ======================== C L A S S ========================
@@ -269,7 +257,7 @@ bool OrderedThreadPool::start() {
         return false;
     }
 
-    std::unique_lock<std::mutex> lock(m_mtx);
+    std::lock_guard<std::mutex> lock(m_mtx);
 
     m_running = true;
     m_requestedStop = false;
@@ -283,22 +271,20 @@ inline
 void OrderedThreadPool::worker_thread() {
     while (true) {
         worker_task_t task { };
+        std::unique_lock<std::mutex> lock(m_mtx);
 
-        {
-            std::unique_lock<std::mutex> lock(m_mtx);
-            m_cv.wait(lock, [&] {
-                return !m_tasks.empty() || m_requestedStop;
-            });
+        m_cv.wait(lock, [&] {
+            return !m_tasks.empty() || m_requestedStop;
+        });
 
-            if (m_requestedStop) {
-                return;
-            }
-
-            task = std::move(m_tasks.front());
-            m_tasks.pop();
+        if (m_requestedStop) {
+            return;
         }
 
-        std::unique_lock<std::mutex> lock(m_orderedMtx);
+        task = std::move(m_tasks.front());
+        m_tasks.pop();
+        lock.unlock();
+
         task();
     }
 }
