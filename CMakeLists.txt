@@ -8,3 +8,10 @@ target_include_directories(ThreadPool
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
+
+#test
+if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(CMAKE_CXX_STANDARD 11)
+    add_executable(Test test/test.cpp)
+    target_link_libraries(Test PRIVATE ThreadPool)
+endif()
