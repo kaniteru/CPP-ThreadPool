@@ -1,10 +1,29 @@
+// thread_pool.hpp
+//
+// This file is part of the CPP-ThreadPool project.
+//
+// Portions of the code in this file were derived or inspired by the following open-source projects:
+// 1. ThreadPool by Henning Peters, Viktor Peppiatt (Original Repository: https://github.com/progschj/ThreadPool)
+// 2. ThreadPool by Jan Niklas Hasse (Fork Repository: https://github.com/jhasse/ThreadPool)
+//
+// Both projects are licensed under the zlib License.
+// The license text is included in this project's LICENSE file, as required by its terms.
+//
+// Specifically, the implementation of the `kani::ThreadPool::enqueue` method has been derived or inspired by the two projects,
+// with improvements and modifications suited to the needs of this project.
+//
+// For details of these changes, refer to the commit history of this project at:
+// https://github.com/kaniteru/CPP-ThreadPool
 #ifndef KANITERU_THREAD_POOL_HPP
 #define KANITERU_THREAD_POOL_HPP
-#include <vector>
 #include <queue>
+#include <vector>
 #include <atomic>
 #include <thread>
+#include <future>
+#include <memory>
 #include <functional>
+#include <type_traits>
 #include <condition_variable>
 
 /* thread_pool.hpp
@@ -12,6 +31,22 @@
  *      - kani::ThreadPool
  *      - kani::OrderedThreadPool
  */
+
+#ifdef _MSVC_LANG
+    /* C++ Standard version in msvc. */
+    #define KANI_CXX_VER _MSVC_LANG
+#else
+    /* C++ Standard version. */
+    #define KANI_CXX_VER __cplusplus
+#endif //_MSVC_LANG
+#define KANI_CXX14 201402L
+#define KANI_CXX17 201703L
+#define KANI_CXX20 202002L
+#if KANI_CXX_VER >= KANI_CXX17
+    #define KANI_INVOKE_RESULT(R, A) std::invoke_result<R, A...>
+#else
+    #define KANI_INVOKE_RESULT(R, A) std::result_of<R(A...)>
+#endif //KANI_CXX_VER >= KANI_CXX17
 
 namespace kani {
 
@@ -21,7 +56,7 @@ namespace kani {
 
 class ThreadPool {
 public:
-    using worker_task_t = std::function<void()>;
+    using worker_task_t = std::packaged_task<void()>;
 
     /**
      * @return Returns true if worker running.
@@ -29,45 +64,37 @@ public:
     bool is_running() const;
 
     /**
-     * @brief Enqueue a task into worker.
-     *
-     * @param [in] task A task.
-     *
-     * @code
-     * ThreadPool tp(...);
-     * tp.enqueue([]() {
-     *     uint32_t i = 0;
-     *
-     *     while (i < 99) {
-     *         std::cout << "your main thread never stops! yay!! << std::endl;
-     *         i++;
-     *     }
-     * });
-     * @endcode
+     * @return Returns true if worker has no tasks.
      */
-    void enqueue(worker_task_t&& task);
+    bool is_empty() const;
 
     /**
-     * @brief Enqueue a task into worker.
+     * @brief Adds a task to the worker for execution.
+     * @note Tasks are processed in the order they were enqueued (FIFO).
      *
-     * @param [in] task A task.
+     * @tparam T Type of the callable object.
+     * @tparam Args Types of the arguments for the callable.
+     * @param t The callable object (e.g., lambda, function pointer, etc.).
+     * @param args Arguments to pass to the callable object.
+     *
+     * @return A std::future object that can be used to retrieve the result of the task.
      *
      * @code
-     * ThreadPool tp(...);
+     * Threadpool tp(...);
      *
-     * ThreadPool::worker_task_t task = []() {
-     *     uint32_t i = 0;
+     * auto res = tp.enqueue([](int a1, int a2) {
+     *      return a1 + a2;
+     * }, 1, 2);
      *
-     *     while (i < 99) {
-     *         std::cout << "your main thread never stops! yay!! << std::endl;
-     *         i++;
-     *     }
-     * };
-     *
-     * tp.enqueue(task);
+     * int add = res.get(); // add == 3
      * @endcode
      */
-    void enqueue(const worker_task_t& task);
+    template <typename T, typename... Args>
+#if KANI_CXX_VER >= KANI_CXX14
+    decltype(auto) enqueue(T&&t, Args&&... args);
+#else
+    auto enqueue(T&& t, Args&&... args) -> std::future<typename KANI_INVOKE_RESULT(T, Args)::type>;
+#endif //KANI_CXX_VER >= KANI_CXX14
 
     /**
      * @brief Clear enqueued tasks in thread pool.
@@ -81,7 +108,7 @@ public:
 
     /**
      * @brief Stop the workers.
-     * <br> To check if the workers have completely stopped, use ThreadPool::is_stopped().
+     * @note To check if the workers have completely stopped, use ThreadPool::is_running().
      * <br>Use ThreadPool::clear() to remove queued tasks that haven't yet been processed.
      *
      * @return Returns true if workers stopped successfully.
@@ -99,6 +126,9 @@ public:
      */
     explicit ThreadPool(size_t lenWorkers = std::thread::hardware_concurrency());
     ~ThreadPool();
+
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
 protected:
     const size_t m_lenWorkers;
     const bool m_orderedTask;
@@ -111,7 +141,7 @@ protected:
 };
 
 // ======================== C L A S S ========================
-// ===    kani::ThreadPool
+// ===    ThreadPool
 // ======================== C L A S S ========================
 
 inline
@@ -120,23 +150,32 @@ bool ThreadPool::is_running() const {
 }
 
 inline
-void ThreadPool::enqueue(worker_task_t&& task) {
-    {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        m_tasks.push(std::move(task));
-    }
-
-    m_cv.notify_one();
+bool ThreadPool::is_empty() const {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_tasks.empty();
 }
 
-inline
-void ThreadPool::enqueue(const worker_task_t& task) {
+template <typename T, typename... Args>
+#if KANI_CXX_VER >= KANI_CXX14
+decltype(auto) ThreadPool::enqueue(T&&t, Args&&... args) {
+#else
+auto ThreadPool::enqueue(T&& t, Args&&... args) -> std::future<typename KANI_INVOKE_RESULT(T, Args)::type> {
+#endif //KANI_CXX_VER >= KANI_CXX14
+    using ret_type = typename KANI_INVOKE_RESULT(T, Args)::type;
+
+    std::packaged_task<ret_type()> task(
+        std::bind(std::forward<T>(t), std::forward<Args>(args)...)
+    );
+
+    std::future<ret_type> res = task.get_future();
+
     {
         std::lock_guard<std::mutex> lock(m_mtx);
-        m_tasks.push(task);
+        m_tasks.emplace(std::move(task));
     }
 
     m_cv.notify_one();
+    return res;
 }
 
 inline
@@ -245,10 +284,13 @@ public:
      */
     OrderedThreadPool();
     ~OrderedThreadPool() = default;
+
+    OrderedThreadPool(const OrderedThreadPool&) = delete;
+    OrderedThreadPool& operator=(const OrderedThreadPool&) = delete;
 };
 
 // ======================== C L A S S ========================
-// ===    kani::OrderedThreadPool
+// ===    OrderedThreadPool
 // ======================== C L A S S ========================
 
 inline
